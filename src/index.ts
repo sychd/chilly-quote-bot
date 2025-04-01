@@ -43,6 +43,7 @@ interface User {
   // Helper function to send a message to a Telegram user
   async function sendTelegramMessage(token: string, chatId: string, text: string, parseMode: string = 'HTML') {
 	const url = `${TELEGRAM_API_BASE}${token}/sendMessage`;
+	console.log('[sendTelegramMessage]' , JSON.stringify({chatId, text, parseMode}));
 	const response = await fetch(url, {
 	  method: 'POST',
 	  headers: {
@@ -188,7 +189,8 @@ interface User {
 	  const chatId = update.message.chat.id.toString();
 	  const messageText = update.message.text || '';
 	  const userName = update.message.from.username || update.message.from.first_name;
-	  
+	  console.log('[handleWebhook]' , JSON.stringify({userId, chatId, messageText, userName}));
+
 	  // Handle /start command
 	  if (messageText === '/start') {
 		const userKey = `user:${userId}`;
