@@ -7,9 +7,9 @@ interface User {
 	last_received_quotes: string[];
   }
   
-  interface Quote {
-	id: string;
-	quote: string;
+  // Updated Quote interface to match the actual API response
+  interface QuoteEntry {
+	quotes: string[];
 	title: string;
 	link: string;
   }
@@ -39,34 +39,45 @@ interface User {
   const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
   const QUOTES_API = 'https://chillyhill.me/api/book-quotes';
   const QUOTES_CACHE_KEY = 'daily_quotes';
+  const BLOG_BASE_URL = 'https://chillyhill.me';
   
   // Helper function to send a message to a Telegram user
-  async function sendTelegramMessage(token: string, chatId: string, text: string, parseMode: string = 'HTML') {
+  async function sendTelegramMessage(token: string, chatId: string, text: string, parseMode: string = 'Markdown') {
 	const url = `${TELEGRAM_API_BASE}${token}/sendMessage`;
-	console.log('[sendTelegramMessage]' , JSON.stringify({chatId, text, parseMode}));
+	
+	// Log the API call details for debugging
+	console.log(`Sending message to chat ID: ${chatId}`);
+	
+	const requestBody = {
+	  chat_id: chatId,
+	  text,
+	  parse_mode: parseMode,
+	};
+	
+	console.log(`Request body: ${JSON.stringify(requestBody)}`);
+	
 	const response = await fetch(url, {
 	  method: 'POST',
 	  headers: {
 		'Content-Type': 'application/json',
 	  },
-	  body: JSON.stringify({
-		chat_id: chatId,
-		text,
-		parse_mode: parseMode,
-	  }),
+	  body: JSON.stringify(requestBody),
 	});
   
+	const responseData = await response.text();
+	console.log(`Response status: ${response.status}`);
+	console.log(`Response body: ${responseData}`);
+  
 	if (!response.ok) {
-	  const error = await response.text();
-	  console.error(`Failed to send message to ${chatId}: ${error}`);
-	  throw new Error(`Failed to send message: ${error}`);
+	  console.error(`Failed to send message to ${chatId}: ${responseData}`);
+	  throw new Error(`Failed to send message: ${responseData}`);
 	}
   
-	return await response.json();
+	return JSON.parse(responseData);
   }
   
   // Helper function to fetch quotes
-  async function fetchQuotes(env: Env): Promise<Quote[]> {
+  async function fetchQuotes(env: Env): Promise<QuoteEntry[]> {
 	// Try to get cached quotes first
 	const cachedQuotes = await env.QUOTES_CACHE.get(QUOTES_CACHE_KEY);
 	
@@ -81,7 +92,7 @@ interface User {
 	  throw new Error('Failed to fetch quotes from API');
 	}
 	
-	const quotes = await response.json() as Quote[];
+	const quotes = await response.json() as QuoteEntry[];
 	
 	// Cache the quotes for 24 hours (86400 seconds)
 	await env.QUOTES_CACHE.put(QUOTES_CACHE_KEY, JSON.stringify(quotes), { expirationTtl: 86400 });
@@ -89,28 +100,23 @@ interface User {
 	return quotes;
   }
   
-  // Helper function to get a random quote that wasn't sent recently to this user
-  function getRandomQuote(quotes: Quote[], user: User): Quote {
-	// Filter out quotes that were recently sent to this user
-	const availableQuotes = quotes.filter(quote => 
-	  !user.last_received_quotes.includes(quote.id)
-	);
+  // Helper function to select a random quote for a user
+  function selectRandomQuote(quoteEntries: QuoteEntry[], user: User): { quoteText: string; entry: QuoteEntry } {
+	// Select a random entry from the available entries
+	const entry = quoteEntries[Math.floor(Math.random() * quoteEntries.length)];
 	
-	// If all quotes were recently sent, just pick a random one
-	if (availableQuotes.length === 0) {
-	  return quotes[Math.floor(Math.random() * quotes.length)];
-	}
+	// Select a random quote from the quotes array in the entry
+	const quoteText = entry.quotes[Math.floor(Math.random() * entry.quotes.length)].trim();
 	
-	// Return a random quote from available ones
-	return availableQuotes[Math.floor(Math.random() * availableQuotes.length)];
+	return { quoteText, entry };
   }
   
   // Helper function to update user's received quotes
-  function updateUserQuotes(user: User, quoteId: string): User {
+  function updateUserQuotes(user: User, quoteText: string): User {
 	const updatedUser = { ...user };
 	
-	// Add the new quote ID to the list
-	updatedUser.last_received_quotes.push(quoteId);
+	// Add the new quote to the list
+	updatedUser.last_received_quotes.push(quoteText);
 	
 	// Keep only the last 10 quotes
 	if (updatedUser.last_received_quotes.length > 10) {
@@ -139,9 +145,9 @@ interface User {
 	  const user = JSON.parse(userJson) as User;
 	  
 	  // Fetch quotes
-	  let quotes: Quote[];
+	  let quoteEntries: QuoteEntry[];
 	  try {
-		quotes = await fetchQuotes(env);
+		quoteEntries = await fetchQuotes(env);
 	  } catch (error) {
 		console.error('Failed to fetch quotes:', error);
 		await sendTelegramMessage(
@@ -153,16 +159,16 @@ interface User {
 	  }
 	  
 	  // Select a random quote
-	  const selectedQuote = getRandomQuote(quotes, user);
+	  const { quoteText, entry } = selectRandomQuote(quoteEntries, user);
 	  
-	  // Format the message
-	  const message = `${selectedQuote.quote}\n<a href="${selectedQuote.link}">${selectedQuote.title}</a>`;
+	  // Format the message using Markdown
+	  const message = `**${quoteText}**\n\n[${entry.title}](${BLOG_BASE_URL}${entry.link})`;
 	  
 	  // Send the quote
 	  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
 	  
 	  // Update user's received quotes
-	  const updatedUser = updateUserQuotes(user, selectedQuote.id);
+	  const updatedUser = updateUserQuotes(user, quoteText);
 	  await env.USER_STORAGE.put(userKey, JSON.stringify(updatedUser));
 	  
 	  console.log(`Quote sent to user ${user.id} (${user.name}) via command`);
@@ -189,8 +195,7 @@ interface User {
 	  const chatId = update.message.chat.id.toString();
 	  const messageText = update.message.text || '';
 	  const userName = update.message.from.username || update.message.from.first_name;
-	  console.log('[handleWebhook]' , JSON.stringify({userId, chatId, messageText, userName}));
-
+	  
 	  // Handle /start command
 	  if (messageText === '/start') {
 		const userKey = `user:${userId}`;
@@ -280,9 +285,9 @@ interface User {
 	  }
 	  
 	  // Fetch quotes once for all users
-	  let quotes: Quote[];
+	  let quoteEntries: QuoteEntry[];
 	  try {
-		quotes = await fetchQuotes(env);
+		quoteEntries = await fetchQuotes(env);
 	  } catch (error) {
 		console.error('Failed to fetch quotes:', error);
 		// Don't proceed further if we can't get quotes
@@ -302,10 +307,10 @@ interface User {
 		  const user = JSON.parse(userJson) as User;
 		  
 		  // Select a random quote
-		  const selectedQuote = getRandomQuote(quotes, user);
+		  const { quoteText, entry } = selectRandomQuote(quoteEntries, user);
 		  
-		  // Format the message
-		  const message = `${selectedQuote.quote}\n<a href="${selectedQuote.link}">${selectedQuote.title}</a>`;
+		  // Format the message using Markdown
+		  const message = `**${quoteText}**\n\n[${entry.title}](${BLOG_BASE_URL}${entry.link})`;
 		  
 		  // Send the quote
 		  try {
@@ -313,7 +318,7 @@ interface User {
 			console.log(`Quote sent to user ${user.id} (${user.name})`);
 			
 			// Update user's received quotes
-			const updatedUser = updateUserQuotes(user, selectedQuote.id);
+			const updatedUser = updateUserQuotes(user, quoteText);
 			await env.USER_STORAGE.put(key.name, JSON.stringify(updatedUser));
 		  } catch (error) {
 			console.error(`Failed to send message to user ${user.id}:`, error);
