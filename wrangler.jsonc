@@ -10,9 +10,22 @@
 	"observability": {
 		"enabled": true
 	},
+	"vars": {
+		"TELEGRAM_BOT_TOKEN": "placeholder",
+	},
+	"kv_namespaces": [
+		{
+			"binding": "USER_STORAGE",
+			"id": "3cb02b27a9404ec09f40ea045d809db3"
+		},
+		{
+			"binding": "QUOTES_CACHE",
+			"id": "e9f48ebd74c445658db568e7f61e665f"
+		}
+	],
 	"triggers": {
 		"crons": [
-			"* * * * *"
+			"0 6 * * *"
 		]
 	}
 	/**
