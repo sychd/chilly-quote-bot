@@ -1,13 +1,10 @@
-// File: src/index.ts
 
-// Define types for our application
 interface User {
 	id: string;
 	name: string;
 	last_received_quotes: string[];
   }
   
-  // Updated Quote interface to match the actual API response
   interface QuoteEntry {
 	quotes: string[];
 	title: string;

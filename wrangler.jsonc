@@ -10,9 +10,6 @@
 	"observability": {
 		"enabled": true
 	},
-	"vars": {
-		"TELEGRAM_BOT_TOKEN": "placeholder",
-	},
 	"kv_namespaces": [
 		{
 			"binding": "USER_STORAGE",
