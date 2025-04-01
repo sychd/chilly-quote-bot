@@ -119,6 +119,62 @@ interface User {
 	return updatedUser;
   }
   
+  // Send a quote to a specific user
+  async function sendQuoteToUser(env: Env, userId: string, chatId: string): Promise<void> {
+	try {
+	  const userKey = `user:${userId}`;
+	  const userJson = await env.USER_STORAGE.get(userKey);
+	  
+	  if (!userJson) {
+		// User not found, send error message
+		await sendTelegramMessage(
+		  env.TELEGRAM_BOT_TOKEN,
+		  chatId,
+		  "You're not registered. Please send /start to register for quotes."
+		);
+		return;
+	  }
+	  
+	  const user = JSON.parse(userJson) as User;
+	  
+	  // Fetch quotes
+	  let quotes: Quote[];
+	  try {
+		quotes = await fetchQuotes(env);
+	  } catch (error) {
+		console.error('Failed to fetch quotes:', error);
+		await sendTelegramMessage(
+		  env.TELEGRAM_BOT_TOKEN,
+		  chatId,
+		  "We were not able to retrieve the record."
+		);
+		return;
+	  }
+	  
+	  // Select a random quote
+	  const selectedQuote = getRandomQuote(quotes, user);
+	  
+	  // Format the message
+	  const message = `${selectedQuote.quote}\n<a href="${selectedQuote.link}">${selectedQuote.title}</a>`;
+	  
+	  // Send the quote
+	  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, message);
+	  
+	  // Update user's received quotes
+	  const updatedUser = updateUserQuotes(user, selectedQuote.id);
+	  await env.USER_STORAGE.put(userKey, JSON.stringify(updatedUser));
+	  
+	  console.log(`Quote sent to user ${user.id} (${user.name}) via command`);
+	} catch (error) {
+	  console.error(`Error sending quote to user ${userId}:`, error);
+	  await sendTelegramMessage(
+		env.TELEGRAM_BOT_TOKEN,
+		chatId,
+		"Sorry, something went wrong while trying to send you a quote."
+	  );
+	}
+  }
+  
   // Handler for webhook events
   async function handleWebhook(request: Request, env: Env): Promise<Response> {
 	try {
@@ -187,15 +243,22 @@ interface User {
 		return new Response('Processed /stop command', { status: 200 });
 	  }
 	  
+	  // Handle /quote command
+	  if (messageText === '/quote') {
+		await sendQuoteToUser(env, userId, chatId);
+		return new Response('Processed /quote command', { status: 200 });
+	  }
+	  
 	  // Default response for other messages
 	  await sendTelegramMessage(
 		env.TELEGRAM_BOT_TOKEN,
 		chatId,
-		`I'm a book quotes bot. Send /start to subscribe or /stop to unsubscribe from daily quotes.`
+		`I'm a book quotes bot. Available commands:\n/start - Subscribe to daily quotes\n/stop - Unsubscribe from quotes\n/quote - Get a quote immediately`
 	  );
 	  
 	  return new Response('Processed message', { status: 200 });
 	} catch (error) {
+	  console.error('Error handling webhook:', error);
 	  const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
 	  return new Response(`Error: ${errorMessage}`, { status: 500 });
 	}
